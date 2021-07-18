@@ -73,15 +73,6 @@ impl std::str::FromStr for Encoding {
 struct CompressionUtils;
 
 impl CompressionUtils {
-    fn accepts_encoding(request: &Request<'_>, encoding: &str) -> bool {
-        request
-            .headers()
-            .get("Accept-Encoding")
-            .flat_map(|accept| accept.split(','))
-            .map(|accept| accept.trim())
-            .any(|accept| accept == encoding)
-    }
-
     fn already_encoded(response: &Response<'_>) -> bool {
         response.headers().get("Content-Encoding").next().is_some()
     }
@@ -129,10 +120,26 @@ impl CompressionUtils {
             return;
         }
 
-        // Compression is done when the request accepts brotli or gzip encoding
-        if CompressionUtils::accepts_encoding(request, "br") {
-            let body = response.body_mut().take();
+        let (accepts_gzip, accepts_br) = request
+            .headers()
+            .get("Accept-Encoding")
+            .flat_map(|accept| accept.split(','))
+            .map(|accept| accept.trim())
+            .fold((false, false), |(accepts_gzip, accepts_br), encoding| {
+                (
+                    accepts_gzip || encoding == "gzip",
+                    accepts_br || encoding == "br",
+                )
+            });
 
+        if !accepts_gzip && !accepts_br {
+            return;
+        }
+
+        let body = response.body_mut().take();
+
+        // Compression is done when the request accepts brotli or gzip encoding
+        if accepts_br {
             let compressor = async_compression::tokio::bufread::BrotliEncoder::with_quality(
                 tokio::io::BufReader::new(body),
                 async_compression::Level::Best,
@@ -143,9 +150,7 @@ impl CompressionUtils {
                 compressor,
                 Encoding::EncodingExt("br".into()),
             );
-        } else if CompressionUtils::accepts_encoding(request, "gzip") {
-            let body = response.body_mut().take();
-
+        } else if accepts_gzip {
             let compressor = async_compression::tokio::bufread::GzipEncoder::with_quality(
                 tokio::io::BufReader::new(body),
                 async_compression::Level::Best,
