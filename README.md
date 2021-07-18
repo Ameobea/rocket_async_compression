@@ -4,6 +4,8 @@ This library provides response compression in both gzip and brotli formats for t
 
 It currently only supports usage with Rocket from git with commit hash `693f4f9ee50057fc735e6e7037e6dee5b485ba10`.  If you want to use a different version, you'll have to fork this library and change `Cargo.toml`.
 
+I'd love to get this merged into Rocket itself eventually since I think it would be a very useful addition that I myself can barely live without in a webserver.
+
 ## Installation
 
 Add this to `Cargo.toml`:
@@ -11,7 +13,7 @@ Add this to `Cargo.toml`:
 ```toml
 [dependencies]
 rocket = { git = "https://github.com/SergioBenitez/Rocket.git", rev = "693f4f9ee50057fc735e6e7037e6dee5b485ba10" }
-rocket_async_compression = "0.1"
+rocket_async_compression = { git = "https://github.com/ameobea/rocket_async_compression.git" }
 ```
 
 ## Usage
