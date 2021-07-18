@@ -130,7 +130,6 @@ impl CompressionUtils {
         }
 
         // Compression is done when the request accepts brotli or gzip encoding
-        // and the corresponding feature is enabled
         if CompressionUtils::accepts_encoding(request, "br") {
             let body = response.body_mut().take();
 
