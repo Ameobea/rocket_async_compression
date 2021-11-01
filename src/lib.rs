@@ -141,7 +141,7 @@ impl CompressionUtils {
         // Compression is done when the request accepts brotli or gzip encoding
         if accepts_br {
             let compressor = async_compression::tokio::bufread::BrotliEncoder::with_quality(
-                tokio::io::BufReader::new(body),
+                rocket::tokio::io::BufReader::new(body),
                 async_compression::Level::Best,
             );
 
@@ -152,7 +152,7 @@ impl CompressionUtils {
             );
         } else if accepts_gzip {
             let compressor = async_compression::tokio::bufread::GzipEncoder::with_quality(
-                tokio::io::BufReader::new(body),
+                rocket::tokio::io::BufReader::new(body),
                 async_compression::Level::Best,
             );
 
