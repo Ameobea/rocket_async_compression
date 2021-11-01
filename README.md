@@ -1,4 +1,4 @@
-If is a fork of https://github.com/ameobea/rocket_async_compression.git.
+This is a fork of https://github.com/ameobea/rocket_async_compression.git.
 
 Changes made:
  - Uses rocket 0.5.0-rc.1
