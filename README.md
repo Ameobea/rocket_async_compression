@@ -20,18 +20,25 @@ Add this to `Cargo.toml`:
 ```toml
 [dependencies]
 rocket = "0.5.0-rc.1"
-rocket_async_compression = { git = "https://github.com/ameobea/rocket_async_compression.git" }
+rocket_async_compression = { git = "https://github.com/somehowchris/rocket_async_compression.git" }
 ```
 
 ## Usage
 
+
+The following example will enable compression on releases cause localhost isn't on a remote network (usually)
 ```rs
 use rocket_async_compression::Compression;
 
 #[launch]
 async fn main() {
-    rocket::build()
-        .mount("/", routes![...])
-        .attach(Compression::fairing())
+    let server = rocket::build()
+        .mount("/", routes![...]);
+        
+    if cfg!(debug_assertions) {
+        server
+    } else {
+        server.attach(Compression::fairing())
+    }
 }
 ```
