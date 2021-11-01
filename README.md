@@ -1,3 +1,10 @@
+If is a fork of https://github.com/ameobea/rocket_async_compression.git.
+
+Changes made:
+ - Uses rocket 0.5.0-rc.1
+ - Removes tokio as a dependency and uses the reexported tokio lib from rocket
+ - Simplified readme
+
 # Rocket Async Compression
 
 This library provides response compression in both gzip and brotli formats for the [Rocket](https://rocket.rs/) using the [`async-compression`](https://docs.rs/async-compression/0.3.8/async_compression/) library.
@@ -12,26 +19,19 @@ Add this to `Cargo.toml`:
 
 ```toml
 [dependencies]
-rocket = { git = "https://github.com/SergioBenitez/Rocket.git", rev = "693f4f9ee50057fc735e6e7037e6dee5b485ba10" }
+rocket = "0.5.0-rc.1"
 rocket_async_compression = { git = "https://github.com/ameobea/rocket_async_compression.git" }
 ```
 
 ## Usage
 
 ```rs
-#[rocket::main]
+use rocket_async_compression::Compression;
+
+#[launch]
 async fn main() {
     rocket::build()
         .mount("/", routes![...])
-        // Attach compression fairing here
-        .attach(rocket_async_compression::Compression::fairing())
-        .ignite()
-        .await
-        .expect("Error starting Rocket")
-        .launch()
-        .await
-        .expect("Error running Rocket");
-
-    println!("Exited cleanly");
+        .attach(Compression::fairing())
 }
 ```
