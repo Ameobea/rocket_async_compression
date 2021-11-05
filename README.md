@@ -14,7 +14,7 @@ Add this to `Cargo.toml`:
 ```toml
 [dependencies]
 rocket = "0.5.0-rc.1"
-rocket_async_compression = { git = "https://github.com/ameobea/rocket_async_compression.git" }
+rocket_async_compression = "0.1.0"
 ```
 
 ## Usage
