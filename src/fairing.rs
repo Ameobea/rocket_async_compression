@@ -47,13 +47,13 @@ lazy_static! {
 ///
 /// use rocket_async_compression::Compression;
 ///
-/// fn main() {
-///     rocket::build()
-///         // ...
-///         .attach(Compression::fairing())
-///         // ...
+///
+/// rocket::build()
+///     // ...
+///     .attach(Compression::fairing())
+///     // ...
 ///     # ;
-/// }
+///
 /// ```
 pub struct Compression(());
 
@@ -68,13 +68,11 @@ impl Compression {
     ///
     /// use rocket_async_compression::Compression;
     ///
-    /// fn main() {
-    ///     rocket::build()
-    ///         // ...
-    ///         .attach(Compression::fairing())
-    ///         // ...
+    /// rocket::build()
+    ///     // ...
+    ///     .attach(Compression::fairing())
+    ///     // ...
     ///     # ;
-    /// }
     /// ```
     pub fn fairing() -> Compression {
         Compression(())
