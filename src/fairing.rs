@@ -48,7 +48,7 @@ lazy_static! {
 /// use rocket_async_compression::Compression;
 ///
 /// fn main() {
-///     rocket::ignite()
+///     rocket::build()
 ///         // ...
 ///         .attach(Compression::fairing())
 ///         // ...
@@ -69,7 +69,7 @@ impl Compression {
     /// use rocket_async_compression::Compression;
     ///
     /// fn main() {
-    ///     rocket::ignite()
+    ///     rocket::build()
     ///         // ...
     ///         .attach(Compression::fairing())
     ///         // ...
