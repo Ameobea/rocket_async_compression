@@ -37,6 +37,6 @@ async fn main() {
 }
 ```
 
-## Contirbutors
+## Contributors
 - Casey Primozic ([Ameobea](https://github.com/Ameobea))
 - Christof Weickhardt ([somehowchris](https://github.com/somehowchris))
