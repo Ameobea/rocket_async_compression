@@ -148,7 +148,7 @@ impl Fairing for CachedCompression {
 
     async fn on_response<'r>(&self, request: &'r Request<'_>, response: &mut Response<'r>) {
         let path = request.uri().path().to_string();
-        let cache_compressed_respones = self.cached_path_endings.iter().any(|s| path.ends_with(s));
+        let cache_compressed_responses = self.cached_path_endings.iter().any(|s| path.ends_with(s));
         let (accepts_gzip, accepts_br) = request
             .headers()
             .get("Accept-Encoding")
@@ -161,7 +161,7 @@ impl Fairing for CachedCompression {
                 )
             });
 
-        if cache_compressed_respones {
+        if cache_compressed_responses {
             if let Some((cached_body, header)) =
                 CACHED_FILES
                     .lock()
@@ -180,7 +180,7 @@ impl Fairing for CachedCompression {
 
         super::CompressionUtils::compress_response(request, response, &EXCLUSIONS);
 
-        if !cache_compressed_respones {
+        if !cache_compressed_responses {
             return;
         }
 
