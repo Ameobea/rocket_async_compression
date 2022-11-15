@@ -13,9 +13,6 @@ lazy_static! {
         MediaType::parse_flexible("application/wasm").unwrap(),
         MediaType::parse_flexible("application/octet-stream").unwrap(),
     ];
-    static ref CACHED_PATH_ENDINGS: Vec<&'static str> = vec![
-        ".otf", "main.dart.js"
-    ];
     static ref CACHED_FILES: Mutex<HashMap<(String, bool, bool), (Vec<u8>, String)>> = {
         let m = HashMap::new();
         Mutex::new(m)
