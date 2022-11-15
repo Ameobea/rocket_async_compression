@@ -1,7 +1,9 @@
 use lazy_static::lazy_static;
-use rocket::fairing::{Fairing, Info, Kind};
-use rocket::http::hyper::header::CONTENT_ENCODING;
-use rocket::{http::MediaType, Request, Response};
+use rocket::{
+    fairing::{Fairing, Info, Kind},
+    http::{hyper::header::CONTENT_ENCODING, MediaType},
+    Request, Response,
+};
 use std::{collections::HashMap, io::Cursor, sync::Mutex};
 use tokio::io::AsyncReadExt;
 
