@@ -1,11 +1,11 @@
 use lazy_static::lazy_static;
+use rocket::tokio::{io::AsyncReadExt, sync::RwLock};
 use rocket::{
     fairing::{Fairing, Info, Kind},
     http::{hyper::header::CONTENT_ENCODING, MediaType},
     Request, Response,
 };
-use std::{collections::HashMap, io::Cursor, sync::Mutex};
-use rocket::tokio::io::AsyncReadExt;
+use std::{collections::HashMap, io::Cursor};
 
 lazy_static! {
     static ref EXCLUSIONS: Vec<MediaType> = vec![
@@ -16,9 +16,9 @@ lazy_static! {
         MediaType::parse_flexible("application/wasm").unwrap(),
         MediaType::parse_flexible("application/octet-stream").unwrap(),
     ];
-    static ref CACHED_FILES: Mutex<HashMap<(String, bool, bool), (Vec<u8>, String)>> = {
+    static ref CACHED_FILES: RwLock<HashMap<(String, bool, bool), (Vec<u8>, String)>> = {
         let m = HashMap::new();
-        Mutex::new(m)
+        RwLock::new(m)
     };
 }
 
@@ -162,8 +162,10 @@ impl Fairing for CachedCompression {
             });
 
         if cache_compressed_responses {
-            let guard = CACHED_FILES.lock().unwrap();
-            if let Some((cached_body, header)) = guard.get(&(path.clone(), accepts_gzip, accepts_br)) {
+            let guard = CACHED_FILES.read().await;
+            if let Some((cached_body, header)) =
+                guard.get(&(path.clone(), accepts_gzip, accepts_br))
+            {
                 response.set_header(rocket::http::Header::new(
                     CONTENT_ENCODING.as_str(),
                     header.clone(),
@@ -194,8 +196,8 @@ impl Fairing for CachedCompression {
             .unwrap()
             .to_string();
         CACHED_FILES
-            .lock()
-            .unwrap()
+            .write()
+            .await
             .insert((path, accepts_gzip, accepts_br), (compressed_body, header));
     }
 }
