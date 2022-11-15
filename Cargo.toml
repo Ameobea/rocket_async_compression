@@ -12,6 +12,7 @@ keywords = ["rocket", "gzip", "brotli", "compression"]
 rocket = "0.5.0-rc.2"
 lazy_static = "1.4.0"
 futures = "0.3.17"
+tokio = { version = "1.20.0" }
 
 async-compression = { version = "0.3.8", features = [
     "gzip",

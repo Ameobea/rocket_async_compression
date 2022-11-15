@@ -12,7 +12,7 @@
 mod fairing;
 mod responder;
 
-pub use self::{fairing::Compression, responder::Compress};
+pub use self::{fairing::{Compression, CachedCompression}, responder::Compress};
 
 use rocket::{
     http::{hyper::header::CONTENT_ENCODING, MediaType},
