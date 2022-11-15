@@ -7,6 +7,8 @@ use rocket::{
 };
 use std::{collections::HashMap, io::Cursor};
 
+use crate::CompressionUtils;
+
 lazy_static! {
     static ref EXCLUSIONS: Vec<MediaType> = vec![
         MediaType::parse_flexible("application/gzip").unwrap(),
@@ -149,17 +151,7 @@ impl Fairing for CachedCompression {
     async fn on_response<'r>(&self, request: &'r Request<'_>, response: &mut Response<'r>) {
         let path = request.uri().path().to_string();
         let cache_compressed_responses = self.cached_path_endings.iter().any(|s| path.ends_with(s));
-        let (accepts_gzip, accepts_br) = request
-            .headers()
-            .get("Accept-Encoding")
-            .flat_map(|accept| accept.split(','))
-            .map(|accept| accept.trim())
-            .fold((false, false), |(accepts_gzip, accepts_br), encoding| {
-                (
-                    accepts_gzip || encoding == "gzip",
-                    accepts_br || encoding == "br",
-                )
-            });
+        let (accepts_gzip, accepts_br) = CompressionUtils::accepted_algorithms(request);
 
         if cache_compressed_responses {
             let guard = CACHED_FILES.read().await;
