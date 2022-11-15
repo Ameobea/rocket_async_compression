@@ -1,8 +1,9 @@
 use lazy_static::lazy_static;
 use rocket::fairing::{Fairing, Info, Kind};
+use rocket::http::hyper::header::CONTENT_ENCODING;
 use rocket::{http::MediaType, Request, Response};
+use std::{collections::HashMap, io::Cursor, sync::Mutex};
 use tokio::io::AsyncReadExt;
-use std::{collections::HashMap, sync::Mutex, io::Cursor};
 
 lazy_static! {
     static ref EXCLUSIONS: Vec<MediaType> = vec![
@@ -103,28 +104,8 @@ impl Fairing for Compression {
 /// response bodies in memory for selected file types/path suffixes, useful for
 /// compressing large compiled JS/CSS files, OTF font packs, etc.
 ///
-/// Compression is done in the same manner as the [`Compress`](super::Compress)
-/// responder.
-///
-/// By default, the fairing does not compress responses with a `Content-Type`
-/// matching any of the following:
-///
-/// - `application/gzip`
-/// - `application/zip`
-/// - `image/*`
-/// - `video/*`
-/// - `application/wasm`
-/// - `application/octet-stream`
-///
-/// The excluded types can be changed changing the `compress.exclude` Rocket
-/// configuration property in Rocket.toml. The default `Content-Type` exclusions
-/// will be ignored if this is set, and must be added back in one by one if
-/// desired.
-///
-/// ```toml
-/// [global.compress]
-/// exclude = ["video/*", "application/x-xz"]
-/// ```
+/// Compression is done in the same manner as the [`Compression`](Compression)
+/// fairing.
 ///
 /// # Usage
 ///
@@ -135,7 +116,6 @@ impl Fairing for Compression {
 ///
 /// use rocket_async_compression::CachedCompression;
 ///
-///
 /// rocket::build()
 ///     // ...
 ///     .attach(CachedCompression::fairing(vec![".otf", "main.dart.js"]))
@@ -144,12 +124,14 @@ impl Fairing for Compression {
 ///
 /// ```
 pub struct CachedCompression {
-    pub cached_path_endings: Vec<&'static str>
+    pub cached_path_endings: Vec<&'static str>,
 }
 
 impl CachedCompression {
     pub fn fairing(cached_path_endings: Vec<&'static str>) -> CachedCompression {
-      CachedCompression { cached_path_endings }
+        CachedCompression {
+            cached_path_endings,
+        }
     }
 }
 
@@ -178,9 +160,14 @@ impl Fairing for CachedCompression {
             });
 
         if cache_compressed_respones {
-            if let Some((cached_body, header)) = CACHED_FILES.lock().unwrap().get(&(path.clone(), accepts_gzip, accepts_br)) {
+            if let Some((cached_body, header)) =
+                CACHED_FILES
+                    .lock()
+                    .unwrap()
+                    .get(&(path.clone(), accepts_gzip, accepts_br))
+            {
                 response.set_header(rocket::http::Header::new(
-                    "content-encoding",
+                    CONTENT_ENCODING.as_str(),
                     header.clone(),
                 ));
                 let body = cached_body.clone();
@@ -198,10 +185,17 @@ impl Fairing for CachedCompression {
         let mut compressed_body: Vec<u8> = vec![];
         match response.body_mut().read_to_end(&mut compressed_body).await {
             Err(_) => return,
-            _ => ()
+            _ => (),
         }
         response.set_sized_body(compressed_body.len(), Cursor::new(compressed_body.clone()));
-        let header = response.headers().get_one("content-encoding").unwrap().to_string();
-        CACHED_FILES.lock().unwrap().insert((path, accepts_gzip, accepts_br), (compressed_body, header));
+        let header = response
+            .headers()
+            .get_one(CONTENT_ENCODING.as_str())
+            .unwrap()
+            .to_string();
+        CACHED_FILES
+            .lock()
+            .unwrap()
+            .insert((path, accepts_gzip, accepts_br), (compressed_body, header));
     }
 }
