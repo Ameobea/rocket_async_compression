@@ -12,7 +12,7 @@
 mod fairing;
 mod responder;
 
-pub use self::{fairing::Compression, responder::Compress};
+pub use self::{fairing::{Compression, CachedCompression}, responder::Compress};
 
 use rocket::{
     http::{hyper::header::CONTENT_ENCODING, MediaType},
@@ -105,6 +105,21 @@ impl CompressionUtils {
         }
     }
 
+    /// Returns a tuple of the form (accepts_gzip, accepts_br).
+    fn accepted_algorithms(request: &Request<'_>) -> (bool, bool) {
+        request
+        .headers()
+        .get("Accept-Encoding")
+        .flat_map(|accept| accept.split(','))
+        .map(|accept| accept.trim())
+        .fold((false, false), |(accepts_gzip, accepts_br), encoding| {
+            (
+                accepts_gzip || encoding == "gzip",
+                accepts_br || encoding == "br",
+            )
+        })
+    }
+
     fn compress_response<'r>(
         request: &Request<'_>,
         response: &'_ mut Response<'r>,
@@ -120,17 +135,7 @@ impl CompressionUtils {
             return;
         }
 
-        let (accepts_gzip, accepts_br) = request
-            .headers()
-            .get("Accept-Encoding")
-            .flat_map(|accept| accept.split(','))
-            .map(|accept| accept.trim())
-            .fold((false, false), |(accepts_gzip, accepts_br), encoding| {
-                (
-                    accepts_gzip || encoding == "gzip",
-                    accepts_br || encoding == "br",
-                )
-            });
+        let (accepts_gzip, accepts_br) = Self::accepted_algorithms(request);
 
         if !accepts_gzip && !accepts_br {
             return;
