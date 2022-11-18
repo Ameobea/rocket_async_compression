@@ -9,13 +9,21 @@
 //! evaluated in the context of your application before enabling compression.
 //!
 
+#[macro_use]
+extern crate log;
+
 mod fairing;
 mod responder;
 
-pub use self::{fairing::{Compression, CachedCompression}, responder::Compress};
+pub use self::{
+    fairing::{CachedCompression, Compression},
+    responder::Compress,
+};
 
+use fairing::CachedEncoding;
 use rocket::{
     http::{hyper::header::CONTENT_ENCODING, MediaType},
+    response::Body,
     Request, Response,
 };
 
@@ -108,16 +116,42 @@ impl CompressionUtils {
     /// Returns a tuple of the form (accepts_gzip, accepts_br).
     fn accepted_algorithms(request: &Request<'_>) -> (bool, bool) {
         request
-        .headers()
-        .get("Accept-Encoding")
-        .flat_map(|accept| accept.split(','))
-        .map(|accept| accept.trim())
-        .fold((false, false), |(accepts_gzip, accepts_br), encoding| {
-            (
-                accepts_gzip || encoding == "gzip",
-                accepts_br || encoding == "br",
-            )
-        })
+            .headers()
+            .get("Accept-Encoding")
+            .flat_map(|accept| accept.split(','))
+            .map(|accept| accept.trim())
+            .fold((false, false), |(accepts_gzip, accepts_br), encoding| {
+                (
+                    accepts_gzip || encoding == "gzip",
+                    accepts_br || encoding == "br",
+                )
+            })
+    }
+
+    async fn compress_body<'r>(
+        body: Body<'r>,
+        encoding: CachedEncoding,
+    ) -> std::io::Result<Vec<u8>> {
+        match encoding {
+            CachedEncoding::Brotli => {
+                let mut compressor = async_compression::tokio::bufread::BrotliEncoder::with_quality(
+                    rocket::tokio::io::BufReader::new(body),
+                    async_compression::Level::Best,
+                );
+                let mut out = Vec::new();
+                rocket::tokio::io::copy(&mut compressor, &mut out).await?;
+                Ok(out)
+            }
+            CachedEncoding::Gzip => {
+                let mut compressor = async_compression::tokio::bufread::GzipEncoder::with_quality(
+                    rocket::tokio::io::BufReader::new(body),
+                    async_compression::Level::Best,
+                );
+                let mut out = Vec::new();
+                rocket::tokio::io::copy(&mut compressor, &mut out).await?;
+                Ok(out)
+            }
+        }
     }
 
     fn compress_response<'r>(
@@ -150,11 +184,7 @@ impl CompressionUtils {
                 async_compression::Level::Best,
             );
 
-            CompressionUtils::set_body_and_encoding(
-                response,
-                compressor,
-                Encoding::EncodingExt("br".into()),
-            );
+            CompressionUtils::set_body_and_encoding(response, compressor, Encoding::Brotli);
         } else if accepts_gzip {
             let compressor = async_compression::tokio::bufread::GzipEncoder::with_quality(
                 rocket::tokio::io::BufReader::new(body),
