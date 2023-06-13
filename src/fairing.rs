@@ -122,21 +122,17 @@ impl Fairing for Compression {
 ///
 /// rocket::build()
 ///     // ...
-///     .attach(CachedCompression::fairing(vec![".otf", "main.dart.js"]))
+///     .attach(CachedCompression {
+/// cached_paths: vec![""],
+/// cached_path_endings: vec![".otf", "main.dart.js"]
+/// })
 ///     // ...
 ///     # ;
 ///
 /// ```
 pub struct CachedCompression {
+    pub cached_paths: Vec<&'static str>,
     pub cached_path_endings: Vec<&'static str>,
-}
-
-impl CachedCompression {
-    pub fn fairing(cached_path_endings: Vec<&'static str>) -> CachedCompression {
-        CachedCompression {
-            cached_path_endings,
-        }
-    }
 }
 
 /// When performing cached compression on a body, it is possible that reading the existing body will fail.  We can't return an error directly from a fairing, so we forward the

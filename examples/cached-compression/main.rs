@@ -11,5 +11,8 @@ async fn rocket() -> _ {
             "/",
             FileServer::from(relative!("examples/cached-compression/static")),
         )
-        .attach(CachedCompression::fairing(vec![".txt"]))
+        .attach(CachedCompression {
+            cached_paths: vec![],
+            cached_path_endings: vec![".txt"],
+        })
 }
