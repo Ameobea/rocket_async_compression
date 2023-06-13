@@ -164,7 +164,8 @@ impl Fairing for CachedCompression {
 
     async fn on_response<'r>(&self, request: &'r Request<'_>, response: &mut Response<'r>) {
         let path = request.uri().path().to_string();
-        let cache_compressed_responses = self.cached_path_endings.iter().any(|s| path.ends_with(s));
+        let cache_compressed_responses = self.cached_path_endings.iter().any(|s| path.ends_with(s))
+            || self.cached_paths.iter().any(|s| path.eq(s));
         if !cache_compressed_responses {
             return;
         }
