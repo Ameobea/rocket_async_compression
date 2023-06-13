@@ -139,6 +139,7 @@ pub struct CachedCompression {
 }
 
 impl CachedCompression {
+    /// Caches only the specific paths provided.
     pub fn specific_fairing(cached_paths: Vec<&'static str>) -> CachedCompression {
         CachedCompression {
             cached_paths,
@@ -148,26 +149,28 @@ impl CachedCompression {
         }
     }
 
+    /// Caches all paths with the provided suffixes.
     pub fn suffix_fairing(cached_path_suffixes: Vec<&'static str>) -> CachedCompression {
         CachedCompression {
+            cached_path_suffixes,
             cached_paths: vec![],
             cached_path_prefixes: vec![],
-            cached_path_suffixes,
             excluded_path_prefixes: vec![],
         }
     }
 
+    /// Caches all paths with the provided suffixes.
     pub fn prefix_fairing(cached_path_prefixes: Vec<&'static str>) -> CachedCompression {
         CachedCompression {
+            cached_path_prefixes,
             cached_paths: vec![],
             cached_path_suffixes: vec![],
-            cached_path_prefixes,
             excluded_path_prefixes: vec![],
         }
     }
 
     /// Caches compressed responses for all paths except those with the excluded prefixes.
-    pub fn exclusive_fairing(excluded_path_prefixes: Vec<&'static str>) -> CachedCompression {
+    pub fn exclusion_fairing(excluded_path_prefixes: Vec<&'static str>) -> CachedCompression {
         CachedCompression {
             excluded_path_prefixes,
             cached_path_prefixes: vec![""],
