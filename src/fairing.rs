@@ -8,7 +8,7 @@ use rocket::{
     },
     Request, Response,
 };
-use std::{collections::HashMap, io::Cursor, task::Poll, vec};
+use std::{collections::HashMap, io::Cursor, task::Poll};
 
 use crate::{CompressionUtils, Encoding};
 
@@ -132,15 +132,15 @@ impl Fairing for Compression {
 ///
 /// ```
 pub struct CachedCompression {
-    pub cached_paths: Vec<&'static str>,
-    pub cached_path_prefixes: Vec<&'static str>,
-    pub cached_path_suffixes: Vec<&'static str>,
-    pub excluded_path_prefixes: Vec<&'static str>,
+    pub cached_paths: Vec<String>,
+    pub cached_path_prefixes: Vec<String>,
+    pub cached_path_suffixes: Vec<String>,
+    pub excluded_path_prefixes: Vec<String>,
 }
 
 impl CachedCompression {
     /// Caches only the specific paths provided.
-    pub fn specific_fairing(cached_paths: Vec<&'static str>) -> CachedCompression {
+    pub fn exact_path_fairing(cached_paths: Vec<String>) -> CachedCompression {
         CachedCompression {
             cached_paths,
             cached_path_prefixes: vec![],
@@ -150,7 +150,7 @@ impl CachedCompression {
     }
 
     /// Caches all paths with the provided suffixes.
-    pub fn suffix_fairing(cached_path_suffixes: Vec<&'static str>) -> CachedCompression {
+    pub fn path_suffix_fairing(cached_path_suffixes: Vec<String>) -> CachedCompression {
         CachedCompression {
             cached_path_suffixes,
             cached_paths: vec![],
@@ -160,7 +160,7 @@ impl CachedCompression {
     }
 
     /// Caches all paths with the provided suffixes.
-    pub fn prefix_fairing(cached_path_prefixes: Vec<&'static str>) -> CachedCompression {
+    pub fn path_prefix_fairing(cached_path_prefixes: Vec<String>) -> CachedCompression {
         CachedCompression {
             cached_path_prefixes,
             cached_paths: vec![],
@@ -170,13 +170,17 @@ impl CachedCompression {
     }
 
     /// Caches compressed responses for all paths except those with the excluded prefixes.
-    pub fn exclusion_fairing(excluded_path_prefixes: Vec<&'static str>) -> CachedCompression {
+    pub fn excluded_path_prefix_fairing(excluded_path_prefixes: Vec<String>) -> CachedCompression {
         CachedCompression {
             excluded_path_prefixes,
-            cached_path_prefixes: vec![""],
+            cached_path_prefixes: vec!["".to_string()],
             cached_paths: vec![],
             cached_path_suffixes: vec![],
         }
+    }
+    /// Caches Vec<&str> to Vec<String>.
+    pub fn static_paths(paths: Vec<&str>) -> Vec<String> {
+        paths.into_iter().map(Into::into).collect()
     }
 }
 
