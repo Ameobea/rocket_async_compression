@@ -135,16 +135,16 @@ pub struct CachedCompression {
     pub cached_paths: Vec<&'static str>,
     pub cached_path_prefixes: Vec<&'static str>,
     pub cached_path_suffixes: Vec<&'static str>,
+    pub excluded_path_prefixes: Vec<&'static str>,
 }
 
 impl CachedCompression {
-    pub fn fairing(
-        cached_paths: Vec<&'static str>,
-    ) -> CachedCompression {
+    pub fn specific_fairing(cached_paths: Vec<&'static str>) -> CachedCompression {
         CachedCompression {
             cached_paths,
             cached_path_prefixes: vec![],
             cached_path_suffixes: vec![],
+            excluded_path_prefixes: vec![],
         }
     }
 
@@ -153,6 +153,7 @@ impl CachedCompression {
             cached_paths: vec![],
             cached_path_prefixes: vec![],
             cached_path_suffixes,
+            excluded_path_prefixes: vec![],
         }
     }
 
@@ -161,6 +162,17 @@ impl CachedCompression {
             cached_paths: vec![],
             cached_path_suffixes: vec![],
             cached_path_prefixes,
+            excluded_path_prefixes: vec![],
+        }
+    }
+
+    /// Caches compressed responses for all paths except those with the excluded prefixes.
+    pub fn exclusive_fairing(excluded_path_prefixes: Vec<&'static str>) -> CachedCompression {
+        CachedCompression {
+            excluded_path_prefixes,
+            cached_path_prefixes: vec![""],
+            cached_paths: vec![],
+            cached_path_suffixes: vec![],
         }
     }
 }
@@ -194,12 +206,17 @@ impl Fairing for CachedCompression {
 
     async fn on_response<'r>(&self, request: &'r Request<'_>, response: &mut Response<'r>) {
         let path = request.uri().path().to_string();
-        let cache_compressed_responses = self.cached_paths.iter().any(|s| path.eq(s))
-            || self.cached_path_suffixes.iter().any(|s| path.ends_with(s))
-            || self
-                .cached_path_prefixes
-                .iter()
-                .any(|s| path.starts_with(s));
+        let excluded_from_cache = self
+            .excluded_path_prefixes
+            .iter()
+            .any(|s| path.starts_with(s));
+        let cache_compressed_responses = !excluded_from_cache
+            && (self.cached_paths.iter().any(|s| path.eq(s))
+                || self.cached_path_suffixes.iter().any(|s| path.ends_with(s))
+                || self
+                    .cached_path_prefixes
+                    .iter()
+                    .any(|s| path.starts_with(s)));
         if !cache_compressed_responses {
             return;
         }
