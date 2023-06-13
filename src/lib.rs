@@ -131,12 +131,13 @@ impl CompressionUtils {
     async fn compress_body<'r>(
         body: Body<'r>,
         encoding: CachedEncoding,
+        level: async_compression::Level
     ) -> std::io::Result<Vec<u8>> {
         match encoding {
             CachedEncoding::Brotli => {
                 let mut compressor = async_compression::tokio::bufread::BrotliEncoder::with_quality(
                     rocket::tokio::io::BufReader::new(body),
-                    async_compression::Level::Best,
+                    level,
                 );
                 let mut out = Vec::new();
                 rocket::tokio::io::copy(&mut compressor, &mut out).await?;
@@ -145,7 +146,7 @@ impl CompressionUtils {
             CachedEncoding::Gzip => {
                 let mut compressor = async_compression::tokio::bufread::GzipEncoder::with_quality(
                     rocket::tokio::io::BufReader::new(body),
-                    async_compression::Level::Best,
+                    level,
                 );
                 let mut out = Vec::new();
                 rocket::tokio::io::copy(&mut compressor, &mut out).await?;
@@ -158,6 +159,7 @@ impl CompressionUtils {
         request: &Request<'_>,
         response: &'_ mut Response<'r>,
         exclusions: &[MediaType],
+        level: async_compression::Level
     ) {
         if CompressionUtils::already_encoded(response) {
             return;
@@ -181,14 +183,14 @@ impl CompressionUtils {
         if accepts_br {
             let compressor = async_compression::tokio::bufread::BrotliEncoder::with_quality(
                 rocket::tokio::io::BufReader::new(body),
-                async_compression::Level::Best,
+                level,
             );
 
             CompressionUtils::set_body_and_encoding(response, compressor, Encoding::Brotli);
         } else if accepts_gzip {
             let compressor = async_compression::tokio::bufread::GzipEncoder::with_quality(
                 rocket::tokio::io::BufReader::new(body),
-                async_compression::Level::Best,
+                level,
             );
 
             CompressionUtils::set_body_and_encoding(response, compressor, Encoding::Gzip);

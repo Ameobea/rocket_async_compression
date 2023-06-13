@@ -22,7 +22,7 @@ use super::CompressionUtils;
 /// let response = Compress("Hi.");
 /// ```
 #[derive(Debug)]
-pub struct Compress<R>(pub R);
+pub struct Compress<R>(pub R, pub async_compression::Level);
 
 impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for Compress<R> {
     #[inline(always)]
@@ -31,7 +31,7 @@ impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for Compress<R> {
             .merge(self.0.respond_to(request)?)
             .finalize();
 
-        CompressionUtils::compress_response(request, &mut response, &[]);
+        CompressionUtils::compress_response(request, &mut response, &[], self.1);
         Ok(response)
     }
 }
