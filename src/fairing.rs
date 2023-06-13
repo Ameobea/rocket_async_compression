@@ -8,7 +8,7 @@ use rocket::{
     },
     Request, Response,
 };
-use std::{collections::HashMap, io::Cursor, task::Poll};
+use std::{collections::HashMap, io::Cursor, task::Poll, vec};
 
 use crate::{CompressionUtils, Encoding};
 
@@ -123,16 +123,46 @@ impl Fairing for Compression {
 /// rocket::build()
 ///     // ...
 ///     .attach(CachedCompression {
-/// cached_paths: vec![""],
-/// cached_path_endings: vec![".otf", "main.dart.js"]
-/// })
+///       cached_paths: vec!["", "/", "/about", "/people", "/posts", "/events", "/groups"],
+///       cached_path_prefixes: vec!["/user/", "/g/", "/p/"],
+///       cached_path_suffixes: vec![".otf", "main.dart.js"]
+///     })
 ///     // ...
 ///     # ;
 ///
 /// ```
 pub struct CachedCompression {
     pub cached_paths: Vec<&'static str>,
-    pub cached_path_endings: Vec<&'static str>,
+    pub cached_path_prefixes: Vec<&'static str>,
+    pub cached_path_suffixes: Vec<&'static str>,
+}
+
+impl CachedCompression {
+    pub fn fairing(
+        cached_paths: Vec<&'static str>,
+    ) -> CachedCompression {
+        CachedCompression {
+            cached_paths,
+            cached_path_prefixes: vec![],
+            cached_path_suffixes: vec![],
+        }
+    }
+
+    pub fn suffix_fairing(cached_path_suffixes: Vec<&'static str>) -> CachedCompression {
+        CachedCompression {
+            cached_paths: vec![],
+            cached_path_prefixes: vec![],
+            cached_path_suffixes,
+        }
+    }
+
+    pub fn prefix_fairing(cached_path_prefixes: Vec<&'static str>) -> CachedCompression {
+        CachedCompression {
+            cached_paths: vec![],
+            cached_path_suffixes: vec![],
+            cached_path_prefixes,
+        }
+    }
 }
 
 /// When performing cached compression on a body, it is possible that reading the existing body will fail.  We can't return an error directly from a fairing, so we forward the
@@ -164,8 +194,12 @@ impl Fairing for CachedCompression {
 
     async fn on_response<'r>(&self, request: &'r Request<'_>, response: &mut Response<'r>) {
         let path = request.uri().path().to_string();
-        let cache_compressed_responses = self.cached_path_endings.iter().any(|s| path.ends_with(s))
-            || self.cached_paths.iter().any(|s| path.eq(s));
+        let cache_compressed_responses = self.cached_paths.iter().any(|s| path.eq(s))
+            || self.cached_path_suffixes.iter().any(|s| path.ends_with(s))
+            || self
+                .cached_path_prefixes
+                .iter()
+                .any(|s| path.starts_with(s));
         if !cache_compressed_responses {
             return;
         }
