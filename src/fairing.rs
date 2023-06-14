@@ -126,7 +126,8 @@ impl Fairing for Compression {
 ///     .attach(CachedCompression {
 ///       cached_paths: vec!["", "/", "/about", "/people", "/posts", "/events", "/groups"],
 ///       cached_path_prefixes: vec!["/user/", "/g/", "/p/"],
-///       cached_path_suffixes: vec![".otf", "main.dart.js"]
+///       cached_path_suffixes: vec![".otf", "main.dart.js"],
+///       ..Default::default()
 ///     })
 ///     // ...
 ///     # ;

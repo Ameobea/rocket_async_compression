@@ -19,22 +19,26 @@ use super::CompressionUtils;
 /// use rocket_async_compression::Compress;
 ///
 /// # #[allow(unused_variables)]
-/// let response = Compress("Hi.");
+/// let response = Compress.default("Hi.");
 /// ```
 #[derive(Debug)]
-pub struct Compress<R>(pub R);
+pub struct Compress<R>(pub R, pub async_compression::Level);
 
-impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for Compress<R> {
-    #[inline(always)]
-    fn respond_to(self, request: &'r Request<'_>) -> response::Result<'o> {
-        CompressToLevel(self.0, async_compression::Level::Default).respond_to(request)
+impl<'r, 'o: 'r, R: Responder<'r, 'o>> Compress<R> {
+    pub fn default(r: R) -> Compress<R> {
+        Compress(r, async_compression::Level::Default)
+    }
+
+    pub fn best(r: R) -> Compress<R> {
+        Compress(r, async_compression::Level::Best)
+    }
+
+    pub fn fastest(r: R) -> Compress<R> {
+        Compress(r, async_compression::Level::Fastest)
     }
 }
 
-#[derive(Debug)]
-pub struct CompressToLevel<R>(pub R, pub async_compression::Level);
-
-impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for CompressToLevel<R> {
+impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for Compress<R> {
     #[inline(always)]
     fn respond_to(self, request: &'r Request<'_>) -> response::Result<'o> {
         let mut response = Response::build()
