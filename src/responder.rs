@@ -22,9 +22,19 @@ use super::CompressionUtils;
 /// let response = Compress("Hi.");
 /// ```
 #[derive(Debug)]
-pub struct Compress<R>(pub R, pub async_compression::Level);
+pub struct Compress<R>(pub R);
 
 impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for Compress<R> {
+    #[inline(always)]
+    fn respond_to(self, request: &'r Request<'_>) -> response::Result<'o> {
+        CompressToLevel(self.0, async_compression::Level::Default).respond_to(request)
+    }
+}
+
+#[derive(Debug)]
+pub struct CompressToLevel<R>(pub R, pub async_compression::Level);
+
+impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for CompressToLevel<R> {
     #[inline(always)]
     fn respond_to(self, request: &'r Request<'_>) -> response::Result<'o> {
         let mut response = Response::build()

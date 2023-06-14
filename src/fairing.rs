@@ -86,7 +86,7 @@ impl Compression {
     ///     # ;
     /// ```
     pub fn fairing() -> Compression {
-        Compression(Level::Best)
+        Compression(Level::Default)
     }
 }
 
