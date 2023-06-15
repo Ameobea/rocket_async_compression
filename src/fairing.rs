@@ -88,6 +88,25 @@ impl Compression {
     pub fn fairing() -> Compression {
         Compression(Level::Default)
     }
+
+    /// Returns a fairing that compresses outgoing requests with the specified
+    /// compression level.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    ///
+    /// use rocket_async_compression::{Compression, Level};
+    ///
+    /// rocket::build()
+    ///    // ...
+    ///    .attach(Compression::with_level(Level::Fastest))
+    ///    // ...
+    ///    # ;
+    /// ```
+    pub fn with_level(level: Level) -> Compression {
+        Compression(level)
+    }
 }
 
 #[rocket::async_trait]

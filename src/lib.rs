@@ -20,6 +20,7 @@ pub use self::{
     responder::Compress,
 };
 
+pub use async_compression::Level;
 use fairing::CachedEncoding;
 use rocket::{
     http::{hyper::header::CONTENT_ENCODING, MediaType},

@@ -13,7 +13,7 @@ Add this to `Cargo.toml`:
 ```toml
 [dependencies]
 rocket = "0.5.0-rc.2"
-rocket_async_compression = "0.4.0"
+rocket_async_compression = "0.5.0"
 ```
 
 ## Usage
