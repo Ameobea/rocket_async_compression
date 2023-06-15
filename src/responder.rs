@@ -18,11 +18,24 @@ use super::CompressionUtils;
 /// ```rust
 /// use rocket_async_compression::Compress;
 ///
-/// # #[allow(unused_variables)]
-/// let response = Compress("Hi.");
+/// let response = Compress::default("Hi.");
 /// ```
 #[derive(Debug)]
-pub struct Compress<R>(pub R);
+pub struct Compress<R>(pub R, pub async_compression::Level);
+
+impl<'r, 'o: 'r, R: Responder<'r, 'o>> Compress<R> {
+    pub fn default(r: R) -> Compress<R> {
+        Compress(r, async_compression::Level::Default)
+    }
+
+    pub fn best(r: R) -> Compress<R> {
+        Compress(r, async_compression::Level::Best)
+    }
+
+    pub fn fastest(r: R) -> Compress<R> {
+        Compress(r, async_compression::Level::Fastest)
+    }
+}
 
 impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for Compress<R> {
     #[inline(always)]
@@ -31,7 +44,7 @@ impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for Compress<R> {
             .merge(self.0.respond_to(request)?)
             .finalize();
 
-        CompressionUtils::compress_response(request, &mut response, &[]);
+        CompressionUtils::compress_response(request, &mut response, &[], self.1);
         Ok(response)
     }
 }

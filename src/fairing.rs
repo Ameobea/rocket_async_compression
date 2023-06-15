@@ -1,3 +1,4 @@
+use async_compression::Level;
 use lazy_static::lazy_static;
 use rocket::{
     fairing::{Fairing, Info, Kind},
@@ -65,7 +66,7 @@ lazy_static! {
 ///     # ;
 ///
 /// ```
-pub struct Compression(());
+pub struct Compression(pub Level);
 
 impl Compression {
     /// Returns a fairing that compresses outgoing requests.
@@ -85,7 +86,26 @@ impl Compression {
     ///     # ;
     /// ```
     pub fn fairing() -> Compression {
-        Compression(())
+        Compression(Level::Default)
+    }
+
+    /// Returns a fairing that compresses outgoing requests with the specified
+    /// compression level.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    ///
+    /// use rocket_async_compression::{Compression, Level};
+    ///
+    /// rocket::build()
+    ///    // ...
+    ///    .attach(Compression::with_level(Level::Fastest))
+    ///    // ...
+    ///    # ;
+    /// ```
+    pub fn with_level(level: Level) -> Compression {
+        Compression(level)
     }
 }
 
@@ -99,7 +119,7 @@ impl Fairing for Compression {
     }
 
     async fn on_response<'r>(&self, request: &'r Request<'_>, response: &mut Response<'r>) {
-        super::CompressionUtils::compress_response(request, response, &EXCLUSIONS);
+        super::CompressionUtils::compress_response(request, response, &EXCLUSIONS, self.0);
     }
 }
 
@@ -123,19 +143,31 @@ impl Fairing for Compression {
 /// rocket::build()
 ///     // ...
 ///     .attach(CachedCompression {
-///       cached_paths: vec!["", "/", "/about", "/people", "/posts", "/events", "/groups"],
-///       cached_path_prefixes: vec!["/user/", "/g/", "/p/"],
-///       cached_path_suffixes: vec![".otf", "main.dart.js"]
+///         cached_paths: vec![
+///             "".to_owned(),
+///             "/".to_owned(),
+///             "/about".to_owned(),
+///             "/people".to_owned(),
+///             "/posts".to_owned(),
+///             "/events".to_owned(),
+///             "/groups".to_owned(),
+///         ],
+///         cached_path_prefixes: vec!["/user/".to_owned(), "/g/".to_owned(), "/p/".to_owned()],
+///         cached_path_suffixes: vec![".otf".to_owned(), "main.dart.js".to_owned()],
+///         ..Default::default()
 ///     })
 ///     // ...
 ///     # ;
-///
 /// ```
+///
+///
+#[derive(Default)]
 pub struct CachedCompression {
     pub cached_paths: Vec<String>,
     pub cached_path_prefixes: Vec<String>,
     pub cached_path_suffixes: Vec<String>,
     pub excluded_path_prefixes: Vec<String>,
+    pub level: Option<Level>,
 }
 
 impl CachedCompression {
@@ -143,9 +175,7 @@ impl CachedCompression {
     pub fn exact_path_fairing(cached_paths: Vec<String>) -> CachedCompression {
         CachedCompression {
             cached_paths,
-            cached_path_prefixes: vec![],
-            cached_path_suffixes: vec![],
-            excluded_path_prefixes: vec![],
+            ..Default::default()
         }
     }
 
@@ -153,9 +183,7 @@ impl CachedCompression {
     pub fn path_suffix_fairing(cached_path_suffixes: Vec<String>) -> CachedCompression {
         CachedCompression {
             cached_path_suffixes,
-            cached_paths: vec![],
-            cached_path_prefixes: vec![],
-            excluded_path_prefixes: vec![],
+            ..Default::default()
         }
     }
 
@@ -163,21 +191,19 @@ impl CachedCompression {
     pub fn path_prefix_fairing(cached_path_prefixes: Vec<String>) -> CachedCompression {
         CachedCompression {
             cached_path_prefixes,
-            cached_paths: vec![],
-            cached_path_suffixes: vec![],
-            excluded_path_prefixes: vec![],
+            ..Default::default()
         }
     }
 
     /// Caches compressed responses for all paths except those with the excluded prefixes.
     pub fn excluded_path_prefix_fairing(excluded_path_prefixes: Vec<String>) -> CachedCompression {
         CachedCompression {
-            excluded_path_prefixes,
             cached_path_prefixes: vec!["".to_string()],
-            cached_paths: vec![],
-            cached_path_suffixes: vec![],
+            excluded_path_prefixes,
+            ..Default::default()
         }
     }
+
     /// Caches Vec<&str> to Vec<String>.
     pub fn static_paths(paths: Vec<&str>) -> Vec<String> {
         paths.into_iter().map(Into::into).collect()
@@ -272,8 +298,12 @@ impl Fairing for CachedCompression {
         }
 
         let body = response.body_mut().take();
-        let compressed_body: Vec<u8> = match CompressionUtils::compress_body(body, desired_encoding)
-            .await
+        let compressed_body: Vec<u8> = match CompressionUtils::compress_body(
+            body,
+            desired_encoding,
+            self.level.unwrap_or(Level::Default),
+        )
+        .await
         {
             Ok(compressed_body) => compressed_body,
             Err(err) => {

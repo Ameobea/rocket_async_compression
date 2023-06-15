@@ -20,6 +20,7 @@ pub use self::{
     responder::Compress,
 };
 
+pub use async_compression::Level;
 use fairing::CachedEncoding;
 use rocket::{
     http::{hyper::header::CONTENT_ENCODING, MediaType},
@@ -131,12 +132,22 @@ impl CompressionUtils {
     async fn compress_body<'r>(
         body: Body<'r>,
         encoding: CachedEncoding,
+        level: async_compression::Level,
     ) -> std::io::Result<Vec<u8>> {
         match encoding {
             CachedEncoding::Brotli => {
+                // The broli library used internally by `async-compression` has a default compression level of "best", or 11.  This
+                // is unsuitable for dynamic data and makes compression extremely slow.
+                //
+                // We set a compression level of 4 if the user requests default which matches the behavior of Nginx.
+                let level = match level {
+                    async_compression::Level::Default => async_compression::Level::Precise(4),
+                    other => other,
+                };
+
                 let mut compressor = async_compression::tokio::bufread::BrotliEncoder::with_quality(
                     rocket::tokio::io::BufReader::new(body),
-                    async_compression::Level::Best,
+                    level,
                 );
                 let mut out = Vec::new();
                 rocket::tokio::io::copy(&mut compressor, &mut out).await?;
@@ -145,7 +156,7 @@ impl CompressionUtils {
             CachedEncoding::Gzip => {
                 let mut compressor = async_compression::tokio::bufread::GzipEncoder::with_quality(
                     rocket::tokio::io::BufReader::new(body),
-                    async_compression::Level::Best,
+                    level,
                 );
                 let mut out = Vec::new();
                 rocket::tokio::io::copy(&mut compressor, &mut out).await?;
@@ -158,6 +169,7 @@ impl CompressionUtils {
         request: &Request<'_>,
         response: &'_ mut Response<'r>,
         exclusions: &[MediaType],
+        level: async_compression::Level,
     ) {
         if CompressionUtils::already_encoded(response) {
             return;
@@ -181,14 +193,14 @@ impl CompressionUtils {
         if accepts_br {
             let compressor = async_compression::tokio::bufread::BrotliEncoder::with_quality(
                 rocket::tokio::io::BufReader::new(body),
-                async_compression::Level::Best,
+                level,
             );
 
             CompressionUtils::set_body_and_encoding(response, compressor, Encoding::Brotli);
         } else if accepts_gzip {
             let compressor = async_compression::tokio::bufread::GzipEncoder::with_quality(
                 rocket::tokio::io::BufReader::new(body),
-                async_compression::Level::Best,
+                level,
             );
 
             CompressionUtils::set_body_and_encoding(response, compressor, Encoding::Gzip);
