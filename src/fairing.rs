@@ -124,14 +124,21 @@ impl Fairing for Compression {
 /// rocket::build()
 ///     // ...
 ///     .attach(CachedCompression {
-///       cached_paths: vec!["", "/", "/about", "/people", "/posts", "/events", "/groups"],
-///       cached_path_prefixes: vec!["/user/", "/g/", "/p/"],
-///       cached_path_suffixes: vec![".otf", "main.dart.js"],
-///       ..Default::default()
+///         cached_paths: vec![
+///             "".to_owned(),
+///             "/".to_owned(),
+///             "/about".to_owned(),
+///             "/people".to_owned(),
+///             "/posts".to_owned(),
+///             "/events".to_owned(),
+///             "/groups".to_owned(),
+///         ],
+///         cached_path_prefixes: vec!["/user/".to_owned(), "/g/".to_owned(), "/p/".to_owned()],
+///         cached_path_suffixes: vec![".otf".to_owned(), "main.dart.js".to_owned()],
+///         ..Default::default()
 ///     })
 ///     // ...
 ///     # ;
-///
 /// ```
 ///
 ///

@@ -18,8 +18,7 @@ use super::CompressionUtils;
 /// ```rust
 /// use rocket_async_compression::Compress;
 ///
-/// # #[allow(unused_variables)]
-/// let response = Compress.default("Hi.");
+/// let response = Compress::default("Hi.");
 /// ```
 #[derive(Debug)]
 pub struct Compress<R>(pub R, pub async_compression::Level);
