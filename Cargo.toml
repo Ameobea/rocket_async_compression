@@ -1,20 +1,16 @@
 [package]
 name = "rocket_async_compression"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 
-description = "Response compression in both gzip and brotli formats for the Rocket webserver using the async-compression library"
+description = "Response compression in both gzip and brotli formats for the Rocket webserver using the `async-compression` library"
 license-file = "LICENSE"
 keywords = ["rocket", "gzip", "brotli", "compression"]
 
 [dependencies]
-rocket = "0.5.0-rc.3"
+rocket = "0.5.0"
 lazy_static = "1.4.0"
 futures = "0.3.17"
 log = "0.4"
 
-async-compression = { version = "0.4.0", features = [
-    "gzip",
-    "brotli",
-    "tokio",
-] }
+async-compression = { version = "0.4.0", features = ["gzip", "brotli", "tokio"] }
