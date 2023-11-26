@@ -4,7 +4,7 @@ version = "0.5.1"
 edition = "2021"
 repository = "https://github.com/Ameobea/rocket_async_compression"
 description = "Response compression in both gzip and brotli formats for the Rocket webserver using the `async-compression` library"
-license-file = "LICENSE"
+license = "MIT"
 keywords = ["rocket", "gzip", "brotli", "compression"]
 
 [dependencies]
