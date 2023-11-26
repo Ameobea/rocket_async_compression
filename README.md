@@ -1,8 +1,6 @@
 # Rocket Async Compression
 
-This library provides response compression in both gzip and brotli formats for the [Rocket](https://rocket.rs/) using the [`async-compression`](https://docs.rs/async-compression/0.3.8/async_compression/) library.
-
-It currently supports usage with Rocket `0.5.0-rc.2`. If you want to use a different version, you'll have to fork this library and change `Cargo.toml`.
+This library provides response compression in both gzip and brotli formats for [Rocket](https://rocket.rs/) using the [`async-compression`](https://docs.rs/async-compression) library.
 
 > I'd love to get this merged into Rocket itself eventually since I think it would be a very useful addition that I myself can barely live without in a webserver.
 
@@ -12,8 +10,8 @@ Add this to `Cargo.toml`:
 
 ```toml
 [dependencies]
-rocket = "0.5.0-rc.2"
-rocket_async_compression = "0.5.0"
+rocket = "0.5"
+rocket_async_compression = "0.5"
 ```
 
 ## Usage
