@@ -1,13 +1,33 @@
-//! Gzip and Brotli response compression.
+//! Gzip and Brotli response compression for Rocket
 //!
 //! See the [`Compression`] and [`Compress`] types for further details.
 //!
-//! # Security Implications
+//! ## Usage
+//!
+//! ```rust
+//! #[macro_use]
+//! extern crate rocket;
+//!
+//! use rocket_async_compression::Compression;
+//!
+//! #[launch]
+//! async fn rocket() -> _ {
+//!     let server = rocket::build()
+//!         .mount("/", routes![...]);
+//!
+//!     if cfg!(debug_assertions) {
+//!         server
+//!     } else {
+//!         server.attach(Compression::fairing())
+//!     }
+//! }
+//! ```
+//!
+//! ## Security Implications
 //!
 //! In some cases, HTTP compression on a site served over HTTPS can make a web
 //! application vulnerable to attacks including BREACH. These risks should be
 //! evaluated in the context of your application before enabling compression.
-//!
 
 #[macro_use]
 extern crate log;

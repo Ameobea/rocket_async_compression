@@ -27,6 +27,7 @@ lazy_static! {
         MediaType::parse_flexible("video/*").unwrap(),
         MediaType::parse_flexible("application/wasm").unwrap(),
         MediaType::parse_flexible("application/octet-stream").unwrap(),
+        MediaType::parse_flexible("text/event-stream").unwrap(),
     ];
     static ref CACHED_FILES: RwLock<HashMap<(String, CachedEncoding), &'static [u8]>> = {
         let m = HashMap::new();
@@ -48,6 +49,7 @@ lazy_static! {
 /// - `video/*`
 /// - `application/wasm`
 /// - `application/octet-stream`
+/// - `text/event-stream`
 ///
 /// # Usage
 ///
@@ -55,7 +57,6 @@ lazy_static! {
 /// application:
 ///
 /// ```rust
-///
 /// use rocket_async_compression::Compression;
 ///
 ///
@@ -66,27 +67,28 @@ lazy_static! {
 ///     # ;
 ///
 /// ```
-pub struct Compression(pub Level);
+pub struct Compression {
+    pub level: Level,
+    pub excluded_content_types: Vec<MediaType>,
+}
 
 impl Compression {
-    /// Returns a fairing that compresses outgoing requests.
+    /// Returns a fairing that compresses outgoing requests.  Uses default compression level and excluded content types.
     ///
     /// ## Example
     /// To attach this fairing, simply call `attach` on the application's
     /// `Rocket` instance with `Compression::fairing()`:
     ///
     /// ```rust
-    ///
     /// use rocket_async_compression::Compression;
     ///
     /// rocket::build()
     ///     // ...
     ///     .attach(Compression::fairing())
     ///     // ...
-    ///     # ;
     /// ```
     pub fn fairing() -> Compression {
-        Compression(Level::Default)
+        Compression::with_level(Level::Default)
     }
 
     /// Returns a fairing that compresses outgoing requests with the specified
@@ -95,17 +97,31 @@ impl Compression {
     /// ## Example
     ///
     /// ```rust
-    ///
     /// use rocket_async_compression::{Compression, Level};
     ///
     /// rocket::build()
     ///    // ...
     ///    .attach(Compression::with_level(Level::Fastest))
     ///    // ...
-    ///    # ;
     /// ```
     pub fn with_level(level: Level) -> Compression {
-        Compression(level)
+        Compression {
+            level,
+            excluded_content_types: EXCLUSIONS.clone(),
+        }
+    }
+
+    /// Replaces the default list of excluded content types with the provided list.
+    pub fn exlude_content_types(self, excluded_content_types: Vec<MediaType>) -> Self {
+        Compression {
+            excluded_content_types,
+            ..self
+        }
+    }
+
+    /// Returns a mutable reference to the list of excluded content types.
+    pub fn excluded_content_types(&mut self) -> &mut Vec<MediaType> {
+        &mut self.excluded_content_types
     }
 }
 
@@ -119,7 +135,12 @@ impl Fairing for Compression {
     }
 
     async fn on_response<'r>(&self, request: &'r Request<'_>, response: &mut Response<'r>) {
-        super::CompressionUtils::compress_response(request, response, &EXCLUSIONS, self.0);
+        super::CompressionUtils::compress_response(
+            request,
+            response,
+            &self.excluded_content_types,
+            self.level,
+        );
     }
 }
 
@@ -137,7 +158,6 @@ impl Fairing for Compression {
 /// application:
 ///
 /// ```rust
-///
 /// use rocket_async_compression::CachedCompression;
 ///
 /// rocket::build()
@@ -157,7 +177,6 @@ impl Fairing for Compression {
 ///         ..Default::default()
 ///     })
 ///     // ...
-///     # ;
 /// ```
 ///
 ///
@@ -204,7 +223,7 @@ impl CachedCompression {
         }
     }
 
-    /// Caches Vec<&str> to Vec<String>.
+    /// Caches `Vec<&str>` to `Vec<String>`.
     pub fn static_paths(paths: Vec<&str>) -> Vec<String> {
         paths.into_iter().map(Into::into).collect()
     }
