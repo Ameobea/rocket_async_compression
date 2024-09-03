@@ -11,7 +11,7 @@ Add this to `Cargo.toml`:
 ```toml
 [dependencies]
 rocket = "0.5"
-rocket_async_compression = "0.5"
+rocket_async_compression = "0.6"
 ```
 
 ## Usage
