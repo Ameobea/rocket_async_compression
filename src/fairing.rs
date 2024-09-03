@@ -25,7 +25,6 @@ lazy_static! {
         MediaType::parse_flexible("application/zip").unwrap(),
         MediaType::parse_flexible("image/*").unwrap(),
         MediaType::parse_flexible("video/*").unwrap(),
-        MediaType::parse_flexible("application/wasm").unwrap(),
         MediaType::parse_flexible("application/octet-stream").unwrap(),
         MediaType::parse_flexible("text/event-stream").unwrap(),
     ];
@@ -47,7 +46,6 @@ lazy_static! {
 /// - `application/zip`
 /// - `image/*`
 /// - `video/*`
-/// - `application/wasm`
 /// - `application/octet-stream`
 /// - `text/event-stream`
 ///
