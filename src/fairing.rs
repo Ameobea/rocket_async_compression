@@ -1,37 +1,61 @@
 use async_compression::Level;
-use lazy_static::lazy_static;
+use bytes::Bytes;
+use moka::future::Cache;
 use rocket::{
-    fairing::{Fairing, Info, Kind},
-    http::{hyper::header::CONTENT_ENCODING, Header, MediaType},
-    tokio::{
-        io::{AsyncRead, ReadBuf},
-        sync::RwLock,
-    },
     Request, Response,
+    fairing::{Fairing, Info, Kind},
+    http::{Header, MediaType},
+    tokio::io::{AsyncRead, ReadBuf},
 };
-use std::{collections::HashMap, io::Cursor, task::Poll};
+use std::{io::Cursor, sync::LazyLock, task::Poll, time::Duration};
+use tracing::{debug, error, warn};
 
-use crate::{CompressionUtils, Encoding};
+use crate::{CONTENT_ENCODING, CompressionUtils, Encoding};
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum CachedEncoding {
     Gzip,
     Brotli,
+    Deflate,
+    Zstd,
 }
 
-lazy_static! {
-    static ref EXCLUSIONS: Vec<MediaType> = vec![
+/// Default maximum number of cached compressed responses (1000 entries).
+pub const DEFAULT_CACHE_MAX_CAPACITY: u64 = 1000;
+
+/// Default time-to-live for cached compressed responses (1 hour).
+pub const DEFAULT_CACHE_TTL: Duration = Duration::from_secs(3600);
+
+/// Default maximum body size for compression (50 MiB).
+///
+/// Bodies larger than this will not be compressed to prevent memory exhaustion.
+pub const DEFAULT_MAX_BODY_SIZE: u64 = 50 * 1024 * 1024;
+
+/// Default compression timeout (30 seconds).
+///
+/// Compression operations taking longer than this will be aborted.
+pub const DEFAULT_COMPRESSION_TIMEOUT: Duration = Duration::from_secs(30);
+
+type CacheKey = (String, CachedEncoding);
+type CacheValue = Bytes;
+type CompressionCache = Cache<CacheKey, CacheValue>;
+
+static EXCLUSIONS: LazyLock<Vec<MediaType>> = LazyLock::new(|| {
+    vec![
         MediaType::parse_flexible("application/gzip").unwrap(),
         MediaType::parse_flexible("application/zip").unwrap(),
         MediaType::parse_flexible("image/*").unwrap(),
         MediaType::parse_flexible("video/*").unwrap(),
         MediaType::parse_flexible("application/octet-stream").unwrap(),
         MediaType::parse_flexible("text/event-stream").unwrap(),
-    ];
-    static ref CACHED_FILES: RwLock<HashMap<(String, CachedEncoding), &'static [u8]>> = {
-        let m = HashMap::new();
-        RwLock::new(m)
-    };
+    ]
+});
+
+fn build_cache(max_capacity: u64, ttl: Duration) -> CompressionCache {
+    Cache::builder()
+        .max_capacity(max_capacity)
+        .time_to_live(ttl)
+        .build()
 }
 
 /// Compresses all responses with Brotli or Gzip compression.
@@ -82,7 +106,7 @@ impl Compression {
     ///
     /// rocket::build()
     ///     // ...
-    ///     .attach(Compression::fairing())
+    ///     .attach(Compression::fairing());
     ///     // ...
     /// ```
     pub fn fairing() -> Compression {
@@ -99,7 +123,7 @@ impl Compression {
     ///
     /// rocket::build()
     ///    // ...
-    ///    .attach(Compression::with_level(Level::Fastest))
+    ///    .attach(Compression::with_level(Level::Fastest));
     ///    // ...
     /// ```
     pub fn with_level(level: Level) -> Compression {
@@ -144,11 +168,21 @@ impl Fairing for Compression {
 
 /// Compresses all responses with Brotli or Gzip compression. Caches compressed
 /// response bodies in memory for selected file types/path suffixes, useful for
-/// compressing large compiled JS/CSS files, OTF font packs, etc.  Note that all
-/// cached files are held in memory indefinitely.
+/// compressing large compiled JS/CSS files, OTF font packs, etc.
 ///
 /// Compression is done in the same manner as the [`Compression`](Compression)
 /// fairing.
+///
+/// # Cache Configuration
+///
+/// The cache has configurable limits to prevent unbounded memory growth:
+///
+/// - **`cache_max_capacity`**: Maximum number of cached entries. When exceeded,
+///   least-recently-used entries are evicted. Default: 1000 entries
+///   (see [`DEFAULT_CACHE_MAX_CAPACITY`]).
+///
+/// - **`cache_ttl`**: Time-to-live for cached entries. Entries are automatically
+///   removed after this duration. Default: 1 hour (see [`DEFAULT_CACHE_TTL`]).
 ///
 /// # Usage
 ///
@@ -160,68 +194,168 @@ impl Fairing for Compression {
 ///
 /// rocket::build()
 ///     // ...
-///     .attach(CachedCompression {
-///         cached_paths: vec![
-///             "".to_owned(),
-///             "/".to_owned(),
-///             "/about".to_owned(),
-///             "/people".to_owned(),
-///             "/posts".to_owned(),
-///             "/events".to_owned(),
-///             "/groups".to_owned(),
-///         ],
-///         cached_path_prefixes: vec!["/user/".to_owned(), "/g/".to_owned(), "/p/".to_owned()],
-///         cached_path_suffixes: vec![".otf".to_owned(), "main.dart.js".to_owned()],
-///         ..Default::default()
-///     })
+///     .attach(CachedCompression::builder()
+///         .cached_paths(vec!["/".to_owned(), "/about".to_owned()])
+///         .cached_path_suffixes(vec![".js".to_owned(), ".css".to_owned()])
+///         .build());
 ///     // ...
 /// ```
 ///
+/// With custom cache settings:
 ///
-#[derive(Default)]
+/// ```rust
+/// use std::time::Duration;
+/// use rocket_async_compression::CachedCompression;
+///
+/// rocket::build()
+///     // ...
+///     .attach(CachedCompression::builder()
+///         .cache_max_capacity(500)
+///         .cache_ttl(Duration::from_secs(1800)) // 30 minutes
+///         .cached_path_suffixes(vec![".js".to_owned()])
+///         .build());
+///     // ...
+/// ```
 pub struct CachedCompression {
-    pub cached_paths: Vec<String>,
-    pub cached_path_prefixes: Vec<String>,
-    pub cached_path_suffixes: Vec<String>,
-    pub excluded_path_prefixes: Vec<String>,
-    pub level: Option<Level>,
+    cached_paths: Vec<String>,
+    cached_path_prefixes: Vec<String>,
+    cached_path_suffixes: Vec<String>,
+    excluded_path_prefixes: Vec<String>,
+    level: Option<Level>,
+    max_body_size: u64,
+    compression_timeout: Duration,
+    cache: CompressionCache,
+}
+
+/// Builder for [`CachedCompression`].
+///
+/// Use [`CachedCompressionBuilder::default()`] or [`CachedCompression::builder()`] to create a new builder,
+/// configure it with the builder methods, and call [`build()`](CachedCompressionBuilder::build) to create
+/// the final [`CachedCompression`] fairing.
+#[derive(Debug, Clone)]
+pub struct CachedCompressionBuilder {
+    cached_paths: Vec<String>,
+    cached_path_prefixes: Vec<String>,
+    cached_path_suffixes: Vec<String>,
+    excluded_path_prefixes: Vec<String>,
+    level: Option<Level>,
+    max_body_size: u64,
+    compression_timeout: Duration,
+    cache_max_capacity: u64,
+    cache_ttl: Duration,
+}
+
+impl Default for CachedCompressionBuilder {
+    fn default() -> Self {
+        Self {
+            cached_paths: Vec::new(),
+            cached_path_prefixes: Vec::new(),
+            cached_path_suffixes: Vec::new(),
+            excluded_path_prefixes: Vec::new(),
+            level: None,
+            max_body_size: DEFAULT_MAX_BODY_SIZE,
+            compression_timeout: DEFAULT_COMPRESSION_TIMEOUT,
+            cache_max_capacity: DEFAULT_CACHE_MAX_CAPACITY,
+            cache_ttl: DEFAULT_CACHE_TTL,
+        }
+    }
+}
+
+impl CachedCompressionBuilder {
+    /// Sets the maximum number of entries the cache can hold.
+    ///
+    /// When the cache exceeds this capacity, least-recently-used entries are evicted.
+    /// Default: 1000 entries.
+    pub fn cache_max_capacity(mut self, capacity: u64) -> Self {
+        self.cache_max_capacity = capacity;
+        self
+    }
+
+    /// Sets the time-to-live for cached entries.
+    ///
+    /// Entries are automatically removed after this duration.
+    /// Default: 1 hour.
+    pub fn cache_ttl(mut self, ttl: Duration) -> Self {
+        self.cache_ttl = ttl;
+        self
+    }
+
+    /// Sets the compression level.
+    pub fn level(mut self, level: Level) -> Self {
+        self.level = Some(level);
+        self
+    }
+
+    /// Sets the exact paths to cache.
+    pub fn cached_paths(mut self, paths: Vec<String>) -> Self {
+        self.cached_paths = paths;
+        self
+    }
+
+    /// Sets the path prefixes to cache.
+    pub fn cached_path_prefixes(mut self, prefixes: Vec<String>) -> Self {
+        self.cached_path_prefixes = prefixes;
+        self
+    }
+
+    /// Sets the path suffixes to cache.
+    pub fn cached_path_suffixes(mut self, suffixes: Vec<String>) -> Self {
+        self.cached_path_suffixes = suffixes;
+        self
+    }
+
+    /// Sets the path prefixes to exclude from caching.
+    pub fn excluded_path_prefixes(mut self, prefixes: Vec<String>) -> Self {
+        self.excluded_path_prefixes = prefixes;
+        self
+    }
+
+    /// Sets the maximum body size that will be compressed.
+    ///
+    /// Bodies larger than this size will not be compressed to prevent memory exhaustion.
+    /// Default: 50 MiB (see [`DEFAULT_MAX_BODY_SIZE`]).
+    pub fn max_body_size(mut self, size: u64) -> Self {
+        self.max_body_size = size;
+        self
+    }
+
+    /// Sets the compression timeout.
+    ///
+    /// Compression operations taking longer than this will be aborted.
+    /// Default: 30 seconds (see [`DEFAULT_COMPRESSION_TIMEOUT`]).
+    pub fn compression_timeout(mut self, timeout: Duration) -> Self {
+        self.compression_timeout = timeout;
+        self
+    }
+
+    /// Builds the [`CachedCompression`] fairing.
+    ///
+    /// This creates the cache with the configured capacity and TTL settings.
+    pub fn build(self) -> CachedCompression {
+        CachedCompression {
+            cached_paths: self.cached_paths,
+            cached_path_prefixes: self.cached_path_prefixes,
+            cached_path_suffixes: self.cached_path_suffixes,
+            excluded_path_prefixes: self.excluded_path_prefixes,
+            level: self.level,
+            max_body_size: self.max_body_size,
+            compression_timeout: self.compression_timeout,
+            cache: build_cache(self.cache_max_capacity, self.cache_ttl),
+        }
+    }
 }
 
 impl CachedCompression {
-    /// Caches only the specific paths provided.
-    pub fn exact_path_fairing(cached_paths: Vec<String>) -> CachedCompression {
-        CachedCompression {
-            cached_paths,
-            ..Default::default()
-        }
+    /// Creates a new builder for `CachedCompression`.
+    ///
+    /// Default cache settings:
+    /// - Maximum capacity: 1000 entries ([`DEFAULT_CACHE_MAX_CAPACITY`])
+    /// - Time-to-live: 1 hour ([`DEFAULT_CACHE_TTL`])
+    pub fn builder() -> CachedCompressionBuilder {
+        CachedCompressionBuilder::default()
     }
 
-    /// Caches all paths with the provided suffixes.
-    pub fn path_suffix_fairing(cached_path_suffixes: Vec<String>) -> CachedCompression {
-        CachedCompression {
-            cached_path_suffixes,
-            ..Default::default()
-        }
-    }
-
-    /// Caches all paths with the provided suffixes.
-    pub fn path_prefix_fairing(cached_path_prefixes: Vec<String>) -> CachedCompression {
-        CachedCompression {
-            cached_path_prefixes,
-            ..Default::default()
-        }
-    }
-
-    /// Caches compressed responses for all paths except those with the excluded prefixes.
-    pub fn excluded_path_prefix_fairing(excluded_path_prefixes: Vec<String>) -> CachedCompression {
-        CachedCompression {
-            cached_path_prefixes: vec!["".to_string()],
-            excluded_path_prefixes,
-            ..Default::default()
-        }
-    }
-
-    /// Caches `Vec<&str>` to `Vec<String>`.
+    /// Converts `Vec<&str>` to `Vec<String>`.
     pub fn static_paths(paths: Vec<&str>) -> Vec<String> {
         paths.into_iter().map(Into::into).collect()
     }
@@ -239,7 +373,7 @@ impl AsyncRead for ErrorBody {
     ) -> Poll<Result<(), std::io::Error>> {
         let err = match self.0.take() {
             Some(err) => err,
-            None => std::io::Error::new(std::io::ErrorKind::Other, "ErrorBody already read"),
+            None => std::io::Error::other("ErrorBody already read"),
         };
         Poll::Ready(Err(err))
     }
@@ -271,8 +405,8 @@ impl Fairing for CachedCompression {
             return;
         }
 
-        let (accepts_gzip, accepts_br) = CompressionUtils::accepted_algorithms(request);
-        if !accepts_gzip && !accepts_br {
+        let preferred = CompressionUtils::preferred_encoding(request);
+        if preferred.is_none() {
             return;
         }
 
@@ -285,60 +419,134 @@ impl Fairing for CachedCompression {
             return;
         }
 
-        let desired_encoding = if accepts_br {
-            CachedEncoding::Brotli
-        } else {
-            CachedEncoding::Gzip
-        };
-        let encoding = match desired_encoding {
-            CachedEncoding::Gzip => Encoding::Gzip,
-            CachedEncoding::Brotli => Encoding::Brotli,
+        // preferred is guaranteed to be Some at this point due to earlier check
+        let encoding = preferred.unwrap();
+        let desired_encoding = match encoding {
+            Encoding::Zstd => CachedEncoding::Zstd,
+            Encoding::Brotli => CachedEncoding::Brotli,
+            Encoding::Gzip => CachedEncoding::Gzip,
+            Encoding::Deflate => CachedEncoding::Deflate,
+            _ => return,
         };
 
-        if cache_compressed_responses && (accepts_gzip || accepts_br) {
-            let cached_body = {
-                let guard = CACHED_FILES.read().await;
-                let body = guard.get(&(path.clone(), desired_encoding)).copied();
-                drop(guard);
-                body
-            };
+        let cache_key = (path.clone(), desired_encoding);
 
-            if let Some(cached_body) = cached_body {
-                debug!("Found cached response for {}", path);
-                response.set_header(Header::new(
-                    CONTENT_ENCODING.as_str(),
-                    format!("{}", encoding),
-                ));
-                response.set_sized_body(cached_body.len(), Cursor::new(cached_body));
+        if let Some(cached_body) = self.cache.get(&cache_key).await {
+            debug!("Found cached response for {}", path);
+            response.set_header(Header::new(CONTENT_ENCODING, format!("{}", encoding)));
+            response.set_sized_body(cached_body.len(), Cursor::new(cached_body));
+            return;
+        }
+
+        // Check body size before compression to prevent memory exhaustion
+        if let Some(size) = response.body().preset_size() {
+            if size > self.max_body_size as usize {
+                warn!(
+                    "Skipping compression for {}: body size {} exceeds max_body_size {}",
+                    path, size, self.max_body_size
+                );
                 return;
             }
         }
 
         let body = response.body_mut().take();
-        let compressed_body: Vec<u8> = match CompressionUtils::compress_body(
+        let compression_future = CompressionUtils::compress_body(
             body,
             desired_encoding,
             self.level.unwrap_or(Level::Default),
+        );
+
+        let compressed_body = match rocket::tokio::time::timeout(
+            self.compression_timeout,
+            compression_future,
         )
         .await
         {
-            Ok(compressed_body) => compressed_body,
-            Err(err) => {
-                error!("Failed to compress response body for {}; underlying `AsyncRead` likely failed: {}", path, err);
+            Ok(Ok(compressed_body)) => compressed_body,
+            Ok(Err(err)) => {
+                error!(
+                    "Failed to compress response body for {}; underlying `AsyncRead` likely failed: {}",
+                    path, err
+                );
                 response.set_streamed_body(ErrorBody(Some(err)));
                 return;
             }
+            Err(_) => {
+                error!(
+                    "Compression timeout for {}: exceeded {:?}",
+                    path, self.compression_timeout
+                );
+                response.set_streamed_body(ErrorBody(Some(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "compression timeout",
+                ))));
+                return;
+            }
         };
-        response.set_header(Header::new(
-            CONTENT_ENCODING.as_str(),
-            format!("{}", encoding),
-        ));
-        response.set_sized_body(compressed_body.len(), Cursor::new(compressed_body.clone()));
 
-        debug!("Setting cached response for {}", path);
-        CACHED_FILES
-            .write()
-            .await
-            .insert((path, desired_encoding), Vec::leak(compressed_body));
+        response.set_header(Header::new(CONTENT_ENCODING, format!("{}", encoding)));
+
+        // Check compressed size to prevent caching excessively large responses
+        let should_cache = compressed_body.len() as u64 <= self.max_body_size;
+        if !should_cache {
+            warn!(
+                "Skipping cache for {}: compressed size {} exceeds max_body_size {}",
+                path,
+                compressed_body.len(),
+                self.max_body_size
+            );
+        }
+
+        let len = compressed_body.len();
+        if should_cache {
+            debug!("Setting cached response for {}", path);
+            self.cache.insert(cache_key, compressed_body.clone()).await;
+        }
+        response.set_sized_body(len, Cursor::new(compressed_body));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cached_compression_builder_cache_settings() {
+        let builder = CachedCompression::builder()
+            .cache_max_capacity(500)
+            .cache_ttl(Duration::from_secs(1800))
+            .max_body_size(10 * 1024 * 1024)
+            .compression_timeout(Duration::from_secs(60));
+
+        assert_eq!(builder.cache_max_capacity, 500);
+        assert_eq!(builder.cache_ttl, Duration::from_secs(1800));
+        assert_eq!(builder.max_body_size, 10 * 1024 * 1024);
+        assert_eq!(builder.compression_timeout, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn test_cached_compression_builder() {
+        let cc = CachedCompression::builder()
+            .cached_paths(vec!["/".to_string(), "/about".to_string()])
+            .cached_path_prefixes(vec!["/api/".to_string()])
+            .cached_path_suffixes(vec![".js".to_string(), ".css".to_string()])
+            .excluded_path_prefixes(vec!["/api/private/".to_string()])
+            .level(Level::Fastest)
+            .build();
+
+        assert_eq!(cc.cached_paths, vec!["/", "/about"]);
+        assert_eq!(cc.cached_path_prefixes, vec!["/api/"]);
+        assert_eq!(cc.cached_path_suffixes, vec![".js", ".css"]);
+        assert_eq!(cc.excluded_path_prefixes, vec!["/api/private/"]);
+        assert!(cc.level.is_some());
+    }
+
+    #[test]
+    fn test_static_paths_helper() {
+        let paths = CachedCompression::static_paths(vec![".js", ".css", ".html"]);
+        assert_eq!(
+            paths,
+            vec![".js".to_string(), ".css".to_string(), ".html".to_string()]
+        );
     }
 }

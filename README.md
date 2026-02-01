@@ -14,6 +14,13 @@ rocket = "0.5"
 rocket_async_compression = "0.6"
 ```
 
+## Features
+
+- **Multiple compression algorithms**: Gzip, Brotli, Deflate, and Zstd with configurable compression levels
+- **Accept-Encoding q-value support**: Respects client preferences including quality values (e.g., `gzip;q=0.8, br;q=1.0`) and `identity` encoding
+- **Cached compression**: Optional in-memory caching for static files with LRU eviction
+- **Configurable limits**: Maximum body size, compression timeout, cache capacity, and TTL
+
 ## Usage
 
 The following example will enable compression only when the crate is built in release mode. Compression can be very slow when using unoptimized debug builds while developing locally.
@@ -41,7 +48,9 @@ async fn rocket() -> _ {
 
 When serving static files, it can be useful to avoid the work of compressing the same files repeatedly for each request. This crate provides an alternative `CachedCompression` fairing which stores cached responses in memory and uses those when available.
 
-Note that cached responses do not expire and will be held in memory for the life of the program. You should only use this fairing for compressing static files that will not change while the server is running.
+The cache has configurable limits to prevent unbounded memory growth:
+- **Maximum capacity**: Default 1000 entries, with LRU eviction when exceeded
+- **Time-to-live**: Default 1 hour, after which entries are automatically removed
 
 ```rs
 #[macro_use]
@@ -57,6 +66,41 @@ async fn rocket() -> _ {
             "/",
             FileServer::from(relative!("static")),
         )
-        .attach(CachedCompression::path_suffix_fairing(vec![".js", ".css", ".html", ".wasm"]))
+        .attach(
+            CachedCompression::builder()
+                .cached_path_suffixes(vec![".js".into(), ".css".into(), ".html".into(), ".wasm".into()])
+                .build()
+        )
 }
 ```
+
+With custom cache settings:
+
+```rs
+use std::time::Duration;
+use rocket_async_compression::CachedCompression;
+
+CachedCompression::builder()
+    .cache_max_capacity(500)           // Maximum 500 cached entries
+    .cache_ttl(Duration::from_secs(1800))  // 30 minute TTL
+    .cached_path_suffixes(vec![".js".into()])
+    .build()
+```
+
+### Accept-Encoding Support
+
+The library fully supports the HTTP `Accept-Encoding` header with quality values:
+
+- Selects the encoding with the highest q-value (e.g., `gzip;q=0.5, br;q=1.0` uses Brotli)
+- Priority when q-values are equal: zstd > brotli > gzip > deflate (by compression efficiency)
+- Respects `identity` encoding - if `identity` has a higher q-value than compression algorithms, no compression is applied
+- Treats `q=0` as "not acceptable" for that encoding
+
+### Supported Algorithms
+
+| Algorithm | Content-Encoding | Notes |
+|-----------|------------------|-------|
+| Zstd | `zstd` | Best compression ratio and speed |
+| Brotli | `br` | Excellent compression, widely supported |
+| Gzip | `gzip` | Universal browser support |
+| Deflate | `deflate` | Legacy support |

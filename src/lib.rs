@@ -1,12 +1,11 @@
-//! Gzip and Brotli response compression for Rocket
+//! Response compression for Rocket supporting Gzip, Brotli, Deflate, and Zstd
 //!
 //! See the [`Compression`] and [`Compress`] types for further details.
 //!
 //! ## Usage
 //!
-//! ```rust
-//! #[macro_use]
-//! extern crate rocket;
+//! ```rust,ignore
+//! use rocket::{routes, launch};
 //!
 //! use rocket_async_compression::Compression;
 //!
@@ -29,25 +28,25 @@
 //! application vulnerable to attacks including BREACH. These risks should be
 //! evaluated in the context of your application before enabling compression.
 
-#[macro_use]
-extern crate log;
-
 mod fairing;
 mod responder;
 
 pub use self::{
-    fairing::{CachedCompression, Compression},
+    fairing::{
+        CachedCompression, CachedCompressionBuilder, Compression, DEFAULT_CACHE_MAX_CAPACITY,
+        DEFAULT_CACHE_TTL, DEFAULT_COMPRESSION_TIMEOUT, DEFAULT_MAX_BODY_SIZE,
+    },
     responder::Compress,
 };
 
 pub use async_compression::Level;
 use fairing::CachedEncoding;
-use rocket::{
-    http::{hyper::header::CONTENT_ENCODING, MediaType},
-    response::Body,
-    Request, Response,
-};
+use http::header::{ACCEPT_ENCODING, HeaderMap, HeaderValue};
+use rocket::{Request, Response, http::MediaType, response::Body};
 
+const CONTENT_ENCODING: &str = "content-encoding";
+
+#[derive(Clone)]
 pub enum Encoding {
     /// The `chunked` encoding.
     Chunked,
@@ -57,6 +56,8 @@ pub enum Encoding {
     Gzip,
     /// The `deflate` encoding.
     Deflate,
+    /// The `zstd` encoding.
+    Zstd,
     /// The `compress` encoding.
     Compress,
     /// The `identity` encoding.
@@ -74,6 +75,7 @@ impl std::fmt::Display for Encoding {
             Encoding::Brotli => "br",
             Encoding::Gzip => "gzip",
             Encoding::Deflate => "deflate",
+            Encoding::Zstd => "zstd",
             Encoding::Compress => "compress",
             Encoding::Identity => "identity",
             Encoding::Trailers => "trailers",
@@ -91,6 +93,7 @@ impl std::str::FromStr for Encoding {
             "br" => Ok(Encoding::Brotli),
             "deflate" => Ok(Encoding::Deflate),
             "gzip" => Ok(Encoding::Gzip),
+            "zstd" => Ok(Encoding::Zstd),
             "compress" => Ok(Encoding::Compress),
             "identity" => Ok(Encoding::Identity),
             "trailers" => Ok(Encoding::Trailers),
@@ -112,7 +115,7 @@ impl CompressionUtils {
         encoding: Encoding,
     ) {
         response.set_header(::rocket::http::Header::new(
-            CONTENT_ENCODING.as_str(),
+            CONTENT_ENCODING,
             format!("{}", encoding),
         ));
         response.set_streamed_body(body);
@@ -134,55 +137,131 @@ impl CompressionUtils {
         }
     }
 
-    /// Returns a tuple of the form (accepts_gzip, accepts_br).
-    fn accepted_algorithms(request: &Request<'_>) -> (bool, bool) {
-        request
-            .headers()
-            .get("Accept-Encoding")
-            .flat_map(|accept| accept.split(','))
-            .map(|accept| accept.trim())
-            .fold((false, false), |(accepts_gzip, accepts_br), encoding| {
-                (
-                    accepts_gzip || encoding == "gzip",
-                    accepts_br || encoding == "br",
-                )
-            })
+    /// Builds an http::HeaderMap from Rocket's request headers for use with fly-accept-encoding.
+    fn build_header_map(request: &Request<'_>) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        for value in request.headers().get("Accept-Encoding") {
+            if let Ok(header_value) = HeaderValue::from_str(value) {
+                headers.append(ACCEPT_ENCODING, header_value);
+            }
+        }
+        headers
+    }
+
+    /// Returns the preferred encoding based on q-values using fly-accept-encoding.
+    /// Returns None if identity is preferred or no compression is accepted.
+    /// Priority when q-values are equal: zstd > brotli > gzip > deflate (by compression ratio).
+    fn preferred_encoding(request: &Request<'_>) -> Option<Encoding> {
+        let headers = Self::build_header_map(request);
+
+        let mut gzip_q: Option<f32> = None;
+        let mut br_q: Option<f32> = None;
+        let mut deflate_q: Option<f32> = None;
+        let mut zstd_q: Option<f32> = None;
+        let mut identity_q: Option<f32> = None;
+
+        for result in fly_accept_encoding::encodings_iter(&headers) {
+            if let Ok((Some(encoding), q)) = result {
+                match encoding {
+                    fly_accept_encoding::Encoding::Gzip => {
+                        gzip_q = Some(gzip_q.map_or(q, |existing| existing.max(q)));
+                    }
+                    fly_accept_encoding::Encoding::Brotli => {
+                        br_q = Some(br_q.map_or(q, |existing| existing.max(q)));
+                    }
+                    fly_accept_encoding::Encoding::Deflate => {
+                        deflate_q = Some(deflate_q.map_or(q, |existing| existing.max(q)));
+                    }
+                    fly_accept_encoding::Encoding::Zstd => {
+                        zstd_q = Some(zstd_q.map_or(q, |existing| existing.max(q)));
+                    }
+                    fly_accept_encoding::Encoding::Identity => {
+                        identity_q = Some(identity_q.map_or(q, |existing| existing.max(q)));
+                    }
+                }
+            }
+        }
+
+        // Collect all supported encodings with their q-values
+        // Priority when equal: zstd > brotli > gzip > deflate
+        let mut candidates: Vec<(Encoding, f32, u8)> = Vec::new();
+        if let Some(q) = zstd_q {
+            candidates.push((Encoding::Zstd, q, 0)); // highest priority
+        }
+        if let Some(q) = br_q {
+            candidates.push((Encoding::Brotli, q, 1));
+        }
+        if let Some(q) = gzip_q {
+            candidates.push((Encoding::Gzip, q, 2));
+        }
+        if let Some(q) = deflate_q {
+            candidates.push((Encoding::Deflate, q, 3)); // lowest priority
+        }
+
+        // Sort by q-value descending, then by priority ascending
+        candidates.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.2.cmp(&b.2))
+        });
+
+        let best_compression = candidates.first().map(|(enc, q, _)| (enc.clone(), *q));
+
+        // If identity is preferred over compression, return None
+        if let Some(identity) = identity_q {
+            match best_compression {
+                Some((enc, q)) if q > identity => Some(enc),
+                Some((enc, q)) if q == identity => Some(enc), // Prefer compression when equal
+                _ => None,
+            }
+        } else {
+            best_compression.map(|(enc, _)| enc)
+        }
     }
 
     async fn compress_body<'r>(
         body: Body<'r>,
         encoding: CachedEncoding,
         level: async_compression::Level,
-    ) -> std::io::Result<Vec<u8>> {
-        match encoding {
-            CachedEncoding::Brotli => {
-                // The broli library used internally by `async-compression` has a default compression level of "best", or 11.  This
-                // is unsuitable for dynamic data and makes compression extremely slow.
-                //
-                // We set a compression level of 4 if the user requests default which matches the behavior of Nginx.
-                let level = match level {
-                    async_compression::Level::Default => async_compression::Level::Precise(4),
-                    other => other,
-                };
+    ) -> std::io::Result<bytes::Bytes> {
+        use rocket::tokio::io::AsyncReadExt;
 
-                let mut compressor = async_compression::tokio::bufread::BrotliEncoder::with_quality(
-                    rocket::tokio::io::BufReader::new(body),
-                    level,
-                );
-                let mut out = Vec::new();
-                rocket::tokio::io::copy(&mut compressor, &mut out).await?;
-                Ok(out)
+        // Adjust brotli default level to 4 (matching Nginx) since the library default of 11 is too slow
+        let level = if matches!(encoding, CachedEncoding::Brotli)
+            && matches!(level, async_compression::Level::Default)
+        {
+            async_compression::Level::Precise(4)
+        } else {
+            level
+        };
+
+        let mut out = Vec::new();
+        let reader = rocket::tokio::io::BufReader::new(body);
+
+        match encoding {
+            CachedEncoding::Zstd => {
+                let mut compressor =
+                    async_compression::tokio::bufread::ZstdEncoder::with_quality(reader, level);
+                compressor.read_to_end(&mut out).await?;
+            }
+            CachedEncoding::Brotli => {
+                let mut compressor =
+                    async_compression::tokio::bufread::BrotliEncoder::with_quality(reader, level);
+                compressor.read_to_end(&mut out).await?;
             }
             CachedEncoding::Gzip => {
-                let mut compressor = async_compression::tokio::bufread::GzipEncoder::with_quality(
-                    rocket::tokio::io::BufReader::new(body),
-                    level,
-                );
-                let mut out = Vec::new();
-                rocket::tokio::io::copy(&mut compressor, &mut out).await?;
-                Ok(out)
+                let mut compressor =
+                    async_compression::tokio::bufread::GzipEncoder::with_quality(reader, level);
+                compressor.read_to_end(&mut out).await?;
+            }
+            CachedEncoding::Deflate => {
+                let mut compressor =
+                    async_compression::tokio::bufread::DeflateEncoder::with_quality(reader, level);
+                compressor.read_to_end(&mut out).await?;
             }
         }
+
+        Ok(out.into())
     }
 
     fn compress_response<'r>(
@@ -201,29 +280,48 @@ impl CompressionUtils {
             return;
         }
 
-        let (accepts_gzip, accepts_br) = Self::accepted_algorithms(request);
-
-        if !accepts_gzip && !accepts_br {
-            return;
-        }
+        let encoding = match Self::preferred_encoding(request) {
+            Some(enc) => enc,
+            None => return,
+        };
 
         let body = response.body_mut().take();
 
-        // Compression is done when the request accepts brotli or gzip encoding
-        if accepts_br {
-            let compressor = async_compression::tokio::bufread::BrotliEncoder::with_quality(
-                rocket::tokio::io::BufReader::new(body),
-                level,
-            );
-
-            CompressionUtils::set_body_and_encoding(response, compressor, Encoding::Brotli);
-        } else if accepts_gzip {
-            let compressor = async_compression::tokio::bufread::GzipEncoder::with_quality(
-                rocket::tokio::io::BufReader::new(body),
-                level,
-            );
-
-            CompressionUtils::set_body_and_encoding(response, compressor, Encoding::Gzip);
+        match encoding {
+            Encoding::Zstd => {
+                let compressor = async_compression::tokio::bufread::ZstdEncoder::with_quality(
+                    rocket::tokio::io::BufReader::new(body),
+                    level,
+                );
+                CompressionUtils::set_body_and_encoding(response, compressor, Encoding::Zstd);
+            }
+            Encoding::Brotli => {
+                let compressor = async_compression::tokio::bufread::BrotliEncoder::with_quality(
+                    rocket::tokio::io::BufReader::new(body),
+                    level,
+                );
+                CompressionUtils::set_body_and_encoding(response, compressor, Encoding::Brotli);
+            }
+            Encoding::Gzip => {
+                let compressor = async_compression::tokio::bufread::GzipEncoder::with_quality(
+                    rocket::tokio::io::BufReader::new(body),
+                    level,
+                );
+                CompressionUtils::set_body_and_encoding(response, compressor, Encoding::Gzip);
+            }
+            Encoding::Deflate => {
+                let compressor = async_compression::tokio::bufread::DeflateEncoder::with_quality(
+                    rocket::tokio::io::BufReader::new(body),
+                    level,
+                );
+                CompressionUtils::set_body_and_encoding(response, compressor, Encoding::Deflate);
+            }
+            // These encodings are not compression algorithms we support
+            Encoding::Chunked
+            | Encoding::Compress
+            | Encoding::Identity
+            | Encoding::Trailers
+            | Encoding::EncodingExt(_) => {}
         }
     }
 }

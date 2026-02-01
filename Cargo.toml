@@ -1,16 +1,19 @@
 [package]
 name = "rocket_async_compression"
 version = "0.6.1"
-edition = "2021"
+edition = "2024"
+rust-version = "1.85"
 repository = "https://github.com/Ameobea/rocket_async_compression"
-description = "Response compression in both gzip and brotli formats for the Rocket webserver using the `async-compression` library"
+description = "Response compression (gzip, brotli, deflate, zstd) for the Rocket webserver using the `async-compression` library"
 license = "MIT"
-keywords = ["rocket", "gzip", "brotli", "compression"]
+keywords = ["rocket", "gzip", "brotli", "zstd", "compression"]
 
 [dependencies]
-rocket = "0.5"
-lazy_static = "1.4"
+rocket = { git = "https://github.com/rwf2/Rocket", branch = "master" }
 futures = "0.3.17"
-log = "0.4"
-
-async-compression = { version = "0.4", features = ["gzip", "brotli", "tokio"] }
+tracing = { version = "0.1.40", default-features = false, features = ["std", "attributes"] }
+async-compression = { version = "0.4", features = ["gzip", "brotli", "deflate", "zstd", "tokio"] }
+moka = { version = "0.12", features = ["future"] }
+fly-accept-encoding = "0.3"
+http = "1"
+bytes = "1"

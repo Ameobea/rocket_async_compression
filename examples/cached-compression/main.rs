@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate rocket;
 
-use rocket::fs::{relative, FileServer};
+use rocket::fs::{FileServer, relative};
 use rocket_async_compression::CachedCompression;
 
 #[launch]
@@ -9,7 +9,11 @@ async fn rocket() -> _ {
     rocket::build()
         .mount(
             "/",
-            FileServer::from(relative!("examples/cached-compression/static")),
+            FileServer::new(relative!("examples/cached-compression/static")),
         )
-        .attach(CachedCompression::path_suffix_fairing(CachedCompression::static_paths(vec![".txt"])))
+        .attach(
+            CachedCompression::builder()
+                .cached_path_suffixes(CachedCompression::static_paths(vec![".txt"]))
+                .build(),
+        )
 }
